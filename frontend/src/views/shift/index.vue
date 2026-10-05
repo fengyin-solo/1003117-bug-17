@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h2>入井管理管理</h2>
-        <p class="page-desc">维护入井记录，围绕记录编号、入井人员、所属班组、入井时间做登记、筛选与状态流转。</p>
+        <p class="page-desc">入井名单上携带救援装备的合格判定与应急救援同一份口径：装备报废或检查过期，名单上立刻同步为不合格。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记入井记录</button>
@@ -36,8 +36,14 @@
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
-          <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td v-for="column in columns" :key="column">
+            <span v-if="column === '携带装备判定摘要'" :class="{ 'bad-text': Number(row['携带不合格装备数']) > 0 }">
+              {{ row[column] ?? '—' }}
+            </span>
+            <template v-else>{{ row[column] ?? '—' }}</template>
+          </td>
           <td class="row-actions">
+            <button class="link" type="button" @click="assignEquipment(row)">登记携带装备</button>
             <button
               v-for="action in actions"
               :key="action"
@@ -70,16 +76,16 @@ import { request } from '@/api/client'
 type Row = Record<string, string | number | null>
 
 const ENDPOINT = '/api/shift'
-const columns = ["记录编号", "入井人员", "所属班组", "入井时间", "升井时间", "携带设备", "出勤区域", "入井状态"]
+const columns = ["记录编号", "入井人员", "所属班组", "入井时间", "升井时间", "携带装备判定摘要", "出勤区域", "入井状态"]
 const actions = ["登记入井", "登记升井", "超时联系"]
 const statuses = ["入井中", "已升井", "超时未升", "已联系"]
-const stats = [{"label": "入井中人数", "value": 0}, {"label": "已升井人数", "value": 0}, {"label": "超时人数", "value": 0}]
+const stats = [{"label": "入井中人数", "value": 0}, {"label": "已升井人数", "value": 0}, {"label": "携带不合格装备记录数", "value": 0}]
 
 const rows = ref<Row[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
-const filterFields = columns.slice(0, 3)
+const filterFields = ["记录编号", "入井人员"]
 
 function resetFilters() {
   filters.value = {}
@@ -94,6 +100,27 @@ function openCreate() {
   errorMessage.value = '入井记录登记入口尚未接入审批流'
 }
 
+async function assignEquipment(row: Row) {
+  const input = window.prompt('携带的救援装备 id（多个用英文逗号分隔）', '')
+  if (input === null) {
+    return
+  }
+  errorMessage.value = ''
+  try {
+    const response = await request(`${ENDPOINT}/${row.id}/equipment`, {
+      method: 'POST',
+      body: JSON.stringify({ 装备id列表: input }),
+    })
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.message ?? '携带装备未登记')
+    }
+    await reload()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '携带装备登记失败'
+  }
+}
+
 async function runAction(action: string, row: Row) {
   errorMessage.value = ''
   try {
@@ -101,8 +128,9 @@ async function runAction(action: string, row: Row) {
       method: 'POST',
       body: JSON.stringify({ action }),
     })
-    if (!response.ok) {
-      throw new Error('入井管理动作未生效，请稍后重试')
+    const payload = await response.json()
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.message ?? '入井管理动作未生效')
     }
     await reload()
   } catch (error) {
