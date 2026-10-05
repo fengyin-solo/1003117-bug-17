@@ -5,14 +5,25 @@
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.bootstrap import run_backfill
 from app.routers import ROUTERS
 from app.store import store
 
-app = FastAPI(title="矿山安全监测管理平台", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # 启动时回填存量救援装备：旧结论按旧口径存档，当前判定按统一口径重算
+    run_backfill()
+    yield
+
+
+app = FastAPI(title="矿山安全监测管理平台", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

@@ -3,7 +3,7 @@
     <header class="page-head">
       <div>
         <h2>应急演练管理</h2>
-        <p class="page-desc">维护演练记录，围绕演练编号、演练主题、演练区域、参演人数做登记、筛选与状态流转。</p>
+        <p class="page-desc">演练装备清单的合格判定与救援装备台账同源：装备报废、归零或检查过期，演练清单上的结论同步变化，不另行下结论。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记演练记录</button>
@@ -31,12 +31,29 @@
       <thead>
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
+          <th>装备判定明细</th>
+          <th>装备判定汇总</th>
+          <th>参演放行</th>
           <th>可执行动作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td>
+            <template v-if="equipmentItems(row).length">
+              <div v-for="item in equipmentItems(row)" :key="item['装备编号']">
+                {{ item['装备编号'] }}：{{ item['判定状态'] }}
+              </div>
+            </template>
+            <span v-else>—</span>
+          </td>
+          <td>{{ typeof row['装备判定汇总'] === 'string' ? row['装备判定汇总'] : '—' }}</td>
+          <td>
+            <span :class="isAllQualified(row) ? 'verdict-pass' : 'verdict-fail'">
+              {{ isAllQualified(row) ? '可参演' : '禁止参演' }}
+            </span>
+          </td>
           <td class="row-actions">
             <button
               v-for="action in actions"
@@ -50,7 +67,7 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 1" class="empty-state">暂无应急演练数据，可先登记演练记录</td>
+          <td :colspan="columns.length + 4" class="empty-state">暂无应急演练数据，可先登记演练记录</td>
         </tr>
       </tbody>
     </table>
@@ -67,10 +84,16 @@ import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
 
-type Row = Record<string, string | number | null>
+type Row = Record<string, string | number | boolean | null | EquipmentVerdict[]>
+
+interface EquipmentVerdict {
+  '装备编号': string
+  '判定结果': string
+  '判定状态': string
+}
 
 const ENDPOINT = '/api/emergencydrill'
-const columns = ["演练编号", "演练主题", "演练区域", "参演人数", "演练日期", "演练评估", "改进措施", "演练状态"]
+const columns = ["演练编号", "演练主题", "演练区域", "参演人数", "演练日期", "装备清单", "演练评估", "改进措施", "演练状态"]
 const actions = ["组织演练", "完成演练", "复盘总结"]
 const statuses = ["待组织", "已组织", "已完成", "已复盘"]
 const stats = [{"label": "待组织演练", "value": 0}, {"label": "已完成演练", "value": 0}, {"label": "已复盘演练", "value": 0}]
@@ -80,6 +103,15 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+function equipmentItems(row: Row): EquipmentVerdict[] {
+  const items = row['装备判定明细']
+  return Array.isArray(items) ? (items as EquipmentVerdict[]) : []
+}
+
+function isAllQualified(row: Row): boolean {
+  return row['装备全部合格'] === true
+}
 
 function resetFilters() {
   filters.value = {}
@@ -99,7 +131,7 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
     if (!response.ok) {
       throw new Error('应急演练动作未生效，请稍后重试')

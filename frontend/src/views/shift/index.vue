@@ -2,8 +2,8 @@
   <section class="page" data-module="shift">
     <header class="page-head">
       <div>
-        <h2>入井管理管理</h2>
-        <p class="page-desc">维护入井记录，围绕记录编号、入井人员、所属班组、入井时间做登记、筛选与状态流转。</p>
+        <h2>入井管理</h2>
+        <p class="page-desc">入井携带设备的合格判定与救援装备台账同源：装备报废、归零或检查过期，入井名单同步标记为不合格，未复核合格不得放行入井。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记入井记录</button>
@@ -31,12 +31,29 @@
       <thead>
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
+          <th>携带装备判定</th>
+          <th>装备判定汇总</th>
+          <th>入井放行</th>
           <th>可执行动作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td>
+            <template v-if="equipmentItems(row).length">
+              <div v-for="item in equipmentItems(row)" :key="item['装备编号']">
+                {{ item['装备编号'] }}：{{ item['判定状态'] }}
+              </div>
+            </template>
+            <span v-else>—</span>
+          </td>
+          <td>{{ typeof row['装备判定汇总'] === 'string' ? row['装备判定汇总'] : '—' }}</td>
+          <td>
+            <span :class="isAllQualified(row) ? 'verdict-pass' : 'verdict-fail'">
+              {{ isAllQualified(row) ? '放行' : '禁止入井' }}
+            </span>
+          </td>
           <td class="row-actions">
             <button
               v-for="action in actions"
@@ -50,7 +67,7 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 1" class="empty-state">暂无入井管理数据，可先登记入井记录</td>
+          <td :colspan="columns.length + 4" class="empty-state">暂无入井管理数据，可先登记入井记录</td>
         </tr>
       </tbody>
     </table>
@@ -67,7 +84,13 @@ import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
 
-type Row = Record<string, string | number | null>
+type Row = Record<string, string | number | boolean | null | EquipmentVerdict[]>
+
+interface EquipmentVerdict {
+  '装备编号': string
+  '判定结果': string
+  '判定状态': string
+}
 
 const ENDPOINT = '/api/shift'
 const columns = ["记录编号", "入井人员", "所属班组", "入井时间", "升井时间", "携带设备", "出勤区域", "入井状态"]
@@ -80,6 +103,15 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+function equipmentItems(row: Row): EquipmentVerdict[] {
+  const items = row['装备判定明细']
+  return Array.isArray(items) ? (items as EquipmentVerdict[]) : []
+}
+
+function isAllQualified(row: Row): boolean {
+  return row['装备全部合格'] === true
+}
 
 function resetFilters() {
   filters.value = {}
@@ -99,7 +131,7 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
     if (!response.ok) {
       throw new Error('入井管理动作未生效，请稍后重试')
